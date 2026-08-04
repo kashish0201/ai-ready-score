@@ -8,15 +8,28 @@ import PreviewTable from "./components/PreviewTable";
 import IssuesList from "./components/IssuesList";
 import ProgressPanel from "./components/ProgressPanel";
 import FixCards from "./components/FixCards";
+import TagsPanel from "./components/TagsPanel";
 import TabBar from "./components/TabBar";
 import {
   applyDatasetFix,
   downloadDatasetCsv,
   getDatasetPreview,
+  getDatasetTags,
   resetDataset,
+  saveDatasetTags,
   setDatasetTarget,
   uploadDataset,
 } from "./api";
+
+function draftFromTagsResponse(columns, proposed, confirmed) {
+  const draft = {};
+  for (const col of columns || []) {
+    if (confirmed?.[col]) draft[col] = confirmed[col];
+    else if (proposed?.[col]?.tag) draft[col] = proposed[col].tag;
+    else draft[col] = "";
+  }
+  return draft;
+}
 
 export default function App() {
   const [fileName, setFileName] = useState(null);
@@ -31,12 +44,25 @@ export default function App() {
   const [previews, setPreviews] = useState(null);
   const [targetRatio, setTargetRatio] = useState(1.5);
   const [activeTab, setActiveTab] = useState("dataset");
+  const [proposedTags, setProposedTags] = useState({});
+  const [tagDraft, setTagDraft] = useState({});
+  const [tagsSaving, setTagsSaving] = useState(false);
+  const [tagsSavedAt, setTagsSavedAt] = useState(null);
   const ratioTimer = useRef(null);
   const ratioTouched = useRef(false);
 
   function applyScore(body) {
     setScoreState(body);
     if (body.previews) setPreviews(body.previews);
+  }
+
+  async function loadTags(id, columns) {
+    const body = await getDatasetTags(id);
+    setProposedTags(body.proposed || {});
+    setTagDraft(
+      draftFromTagsResponse(columns, body.proposed || {}, body.confirmed || {}),
+    );
+    return body;
   }
 
   async function handleFile(next) {
@@ -47,6 +73,9 @@ export default function App() {
     setDatasetId(null);
     setFileName(null);
     setTargetCandidates([]);
+    setProposedTags({});
+    setTagDraft({});
+    setTagsSavedAt(null);
     setActiveTab("dataset");
     ratioTouched.current = false;
     if (!next) return;
@@ -67,6 +96,7 @@ export default function App() {
         round_num: 1,
         original_score: null,
       });
+      await loadTags(body.dataset_id, body.columns);
       setActiveTab("dataset");
     } catch (err) {
       setError(err.message);
@@ -84,11 +114,12 @@ export default function App() {
     try {
       const scored = await setDatasetTarget(datasetId, targetCol);
       applyScore(scored);
+      await loadTags(datasetId, scored.columns);
       const preview = await getDatasetPreview(datasetId, {
         targetRatio,
       });
       setPreviews(preview.previews || []);
-      setActiveTab("score");
+      setActiveTab("tags");
     } catch (err) {
       setError(err.message);
       setPreviews(null);
@@ -96,6 +127,35 @@ export default function App() {
       setLoading(false);
       setPreviewLoading(false);
     }
+  }
+
+  async function handleSaveTags() {
+    if (!datasetId) return;
+    setTagsSaving(true);
+    setError(null);
+    try {
+      const tags = {};
+      for (const [col, value] of Object.entries(tagDraft)) {
+        if (value) tags[col] = value;
+      }
+      await saveDatasetTags(datasetId, tags);
+      setTagsSavedAt(Date.now());
+      if (scoreState?.score != null) {
+        setPreviewLoading(true);
+        const preview = await getDatasetPreview(datasetId, { targetRatio });
+        setPreviews(preview.previews || []);
+        setPreviewLoading(false);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTagsSaving(false);
+    }
+  }
+
+  function handleTagChange(column, value) {
+    setTagDraft((prev) => ({ ...prev, [column]: value }));
+    setTagsSavedAt(null);
   }
 
   async function handleApply(fixName) {
@@ -126,6 +186,7 @@ export default function App() {
     try {
       const scored = await resetDataset(datasetId);
       applyScore(scored);
+      await loadTags(datasetId, scored.columns);
       const preview = await getDatasetPreview(datasetId, { targetRatio });
       setPreviews(preview.previews || []);
       setActiveTab("score");
@@ -187,9 +248,16 @@ export default function App() {
   const hasAnalysis = Boolean(scoreState?.score != null);
   const issueCount = scoreState?.issues?.length ?? 0;
   const fixCount = previews?.length ?? 0;
+  const confirmedTagCount = Object.values(tagDraft).filter(Boolean).length;
 
   const tabs = [
     { id: "dataset", label: "Dataset" },
+    {
+      id: "tags",
+      label: "Tags",
+      badge: datasetId ? confirmedTagCount : null,
+      disabled: !datasetId,
+    },
     {
       id: "issues",
       label: "Issues",
@@ -245,6 +313,18 @@ export default function App() {
                     </p>
                   )}
                 </>
+              )}
+
+              {activeTab === "tags" && (
+                <TagsPanel
+                  columns={scoreState.columns}
+                  proposed={proposedTags}
+                  draft={tagDraft}
+                  onChange={handleTagChange}
+                  onSave={handleSaveTags}
+                  saving={tagsSaving || previewLoading}
+                  savedAt={tagsSavedAt}
+                />
               )}
 
               {activeTab === "issues" && hasAnalysis && (

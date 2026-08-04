@@ -125,6 +125,18 @@ function FixCard({ preview, busy, targetRatio, onTargetRatioChange, onApply }) {
         )}
       </div>
 
+      {Array.isArray(preview.protected) && preview.protected.length > 0 && (
+        <p className="protected-note">
+          Protected:{" "}
+          {preview.protected.map((p) => p.column).filter(Boolean).join(", ")}
+          {" "}(
+          {[...new Set(preview.protected.map((p) => p.tag).filter(Boolean))].join(
+            ", ",
+          ) || "tagged"}{" "}
+          — this fix was skipped for these columns).
+        </p>
+      )}
+
       <div className={`fix-cost cost-${verdict}`}>
         <div className="panel-label">cost</div>
         {creates.length > 0 && (

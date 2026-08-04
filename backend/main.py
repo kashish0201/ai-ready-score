@@ -27,6 +27,7 @@ from backend.quality import (
     run_quality_checks,
 )
 from backend import store
+from semantic_tags import TAG_RULES, propose_tags
 import fix_preview  # noqa: E402  — uses sibling `fixes` on BACKEND_DIR path
 
 app = FastAPI(title="AI-Ready Score API")
@@ -39,6 +40,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+KNOWN_TAGS = set(TAG_RULES.keys())
+
 
 class TargetBody(BaseModel):
     target_col: str | None = None
@@ -47,6 +50,10 @@ class TargetBody(BaseModel):
 class ApplyBody(BaseModel):
     fix: str
     target_ratio: float = 1.5
+
+
+class TagsBody(BaseModel):
+    tags: dict[str, str]
 
 
 def _read_csv_bytes(raw: bytes) -> pd.DataFrame:
@@ -68,6 +75,10 @@ def _require_entry(dataset_id: str) -> dict:
         return store.get_entry(dataset_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown dataset_id") from exc
+
+
+def _entry_tags(entry: dict) -> dict[str, str]:
+    return dict(entry.get("tags") or {})
 
 
 def _score_payload(entry: dict) -> dict:
@@ -95,6 +106,7 @@ def _score_payload(entry: dict) -> dict:
         "original_score": entry["original_score"],
         "history": entry["history"],
         "target_col": target,
+        "tags": _entry_tags(entry),
         "overview": get_dataset_overview(current),
         "columns": list(current.columns),
         "preview_rows": _preview_rows(current),
@@ -110,6 +122,7 @@ def _preview_rows(df: pd.DataFrame, n: int = 10) -> list:
 
 
 def _run_previews(entry: dict, target_ratio: float = 1.5, selected=None) -> list:
+    tags = _entry_tags(entry) or None
     return fix_preview.preview_fixes(
         entry["current_df"],
         entry["target_col"],
@@ -117,15 +130,22 @@ def _run_previews(entry: dict, target_ratio: float = 1.5, selected=None) -> list
         compute_ai_ready_score,
         selected=selected,
         target_ratio=target_ratio,
+        tags=tags,
     )
 
 
 def _get_or_build_previews(dataset_id: str, entry: dict, target_ratio: float) -> list:
-    cached = store.get_preview_cache(dataset_id, entry["round_num"], target_ratio)
+    tags = _entry_tags(entry)
+    tags_key = store.tags_cache_key(tags)
+    cached = store.get_preview_cache(
+        dataset_id, entry["round_num"], target_ratio, tags_key
+    )
     if cached is not None:
         return cached
     previews = _run_previews(entry, target_ratio=target_ratio, selected=None)
-    store.set_preview_cache(dataset_id, entry["round_num"], target_ratio, previews)
+    store.set_preview_cache(
+        dataset_id, entry["round_num"], target_ratio, previews, tags_key
+    )
     return previews
 
 
@@ -174,6 +194,49 @@ async def get_score(dataset_id: str):
     return to_jsonable(await run_in_threadpool(_score))
 
 
+@app.get("/api/datasets/{dataset_id}/tags")
+async def get_tags(dataset_id: str):
+    entry = _require_entry(dataset_id)
+
+    def _tags():
+        current = store.get_entry(dataset_id)
+        proposed = propose_tags(current["current_df"])
+        return {
+            "proposed": proposed,
+            "confirmed": _entry_tags(current),
+        }
+
+    return to_jsonable(await run_in_threadpool(_tags))
+
+
+@app.put("/api/datasets/{dataset_id}/tags")
+async def put_tags(dataset_id: str, body: TagsBody):
+    _require_entry(dataset_id)
+    unknown = sorted({tag for tag in body.tags.values() if tag not in KNOWN_TAGS})
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tag(s): {', '.join(unknown)}",
+        )
+
+    def _put():
+        stored = store.set_tags(dataset_id, body.tags)
+        return {"tags": stored}
+
+    return to_jsonable(await run_in_threadpool(_put))
+
+
+@app.delete("/api/datasets/{dataset_id}/tags/{column}")
+async def delete_tag(dataset_id: str, column: str):
+    _require_entry(dataset_id)
+
+    def _delete():
+        stored = store.clear_column_tag(dataset_id, column)
+        return {"tags": stored}
+
+    return to_jsonable(await run_in_threadpool(_delete))
+
+
 @app.get("/api/datasets/{dataset_id}/preview")
 async def get_preview(
     dataset_id: str,
@@ -181,10 +244,10 @@ async def get_preview(
     selected: str | None = None,
 ):
     """
-    Full preview is cached per (dataset_id, round_num, target_ratio).
+    Full preview is cached per (dataset_id, round_num, target_ratio, tags).
     Pass selected=fix_name to refresh a single card (e.g. class_imbalance ratio).
     """
-    entry = _require_entry(dataset_id)
+    _require_entry(dataset_id)
     selected_list = [selected] if selected else None
 
     def _preview():
@@ -198,6 +261,7 @@ async def get_preview(
         return {
             "round_num": current["round_num"],
             "previews": previews,
+            "tags": _entry_tags(current),
         }
 
     return to_jsonable(await run_in_threadpool(_preview))
@@ -205,7 +269,7 @@ async def get_preview(
 
 @app.post("/api/datasets/{dataset_id}/apply")
 async def apply_fix(dataset_id: str, body: ApplyBody):
-    entry = _require_entry(dataset_id)
+    _require_entry(dataset_id)
     fix_name = body.fix
     if fix_name not in fix_preview.SINGLE_FIXES:
         raise HTTPException(status_code=400, detail=f"Unknown fix name: {fix_name}")
@@ -214,6 +278,7 @@ async def apply_fix(dataset_id: str, body: ApplyBody):
         current = store.get_entry(dataset_id)
         df = current["current_df"]
         target = current["target_col"]
+        tags = _entry_tags(current) or None
         ratio = float(body.target_ratio)
 
         issues_before = run_quality_checks(df, target_col=target)
@@ -226,7 +291,9 @@ async def apply_fix(dataset_id: str, body: ApplyBody):
             )
 
         try:
-            fixed_df, log = fix_preview.SINGLE_FIXES[fix_name](df, target, ratio)
+            fixed_df, log = fix_preview.SINGLE_FIXES[fix_name](
+                df, target, ratio, tags
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 

@@ -19,6 +19,29 @@ ORDER MATTERS (learned the hard way on the churn dataset):
 import numpy as np
 import pandas as pd
 
+from semantic_tags import fix_allowed
+
+
+def _column_tag(tags, column):
+    if not tags:
+        return None
+    return tags.get(column)
+
+
+def _skip_entry(column, tags):
+    return {
+        "column": column,
+        "tag": (tags or {}).get(column),
+        "reason": "tag forbids this fix",
+    }
+
+
+def _decide(fix_name, column, tags):
+    """Return allow | soften | forbid. tags=None => always allow."""
+    if tags is None:
+        return "allow"
+    return fix_allowed(fix_name, _column_tag(tags, column))
+
 
 # ---------------------------------------------------------------------------
 # 1. DUPLICATE ROWS  ->  drop them
@@ -124,7 +147,7 @@ def fix_high_cardinality(df, threshold=0.5, protect=()):
 # ---------------------------------------------------------------------------
 # 5. MISSING VALUES  ->  drop hopeless columns, impute the rest
 # ---------------------------------------------------------------------------
-def fix_missing_values(df, drop_threshold=0.5, protect=()):
+def fix_missing_values(df, drop_threshold=0.5, protect=(), tags=None):
     """
     Two-tier strategy:
       - column missing MORE than drop_threshold (default 50%) -> drop it,
@@ -132,13 +155,27 @@ def fix_missing_values(df, drop_threshold=0.5, protect=()):
       - otherwise -> fill:  numeric = median, categorical = most frequent.
 
     Median (not mean) because it is not dragged around by outliers.
+    Semantic tags may forbid or soften acting on a column.
     """
     fixed = df.copy()
     dropped, imputed = [], []
+    skipped, needs_review = [], []
 
     for col in list(fixed.columns):
         n_missing = fixed[col].isna().sum()
         if n_missing == 0:
+            continue
+
+        decision = _decide("missing_values", col, tags)
+        if decision == "forbid":
+            skipped.append(_skip_entry(col, tags))
+            continue
+        if decision == "soften":
+            needs_review.append({
+                "column": col,
+                "tag": (tags or {}).get(col),
+                "reason": "tag softens this fix — skipped pending review",
+            })
             continue
 
         pct = n_missing / len(fixed)
@@ -169,6 +206,8 @@ def fix_missing_values(df, drop_threshold=0.5, protect=()):
         "action": f"dropped columns >{drop_threshold:.0%} missing; imputed the rest",
         "columns_dropped": dropped,
         "columns_imputed": imputed,
+        "skipped": skipped,
+        "needs_review": needs_review,
         "applied": bool(dropped or imputed),
     }
 
@@ -176,14 +215,28 @@ def fix_missing_values(df, drop_threshold=0.5, protect=()):
 # ---------------------------------------------------------------------------
 # 6. MIXED CASING  ->  standardise to lowercase
 # ---------------------------------------------------------------------------
-def fix_mixed_casing(df):
+def fix_mixed_casing(df, tags=None):
     """'Yes' / 'yes' / 'YES' are three categories to a model. Make them one."""
     fixed = df.copy()
     changed = []
+    skipped, needs_review = [], []
 
     for col in fixed.columns:
         if not pd.api.types.is_object_dtype(fixed[col]):
             continue
+
+        decision = _decide("mixed_casing", col, tags)
+        if decision == "forbid":
+            skipped.append(_skip_entry(col, tags))
+            continue
+        if decision == "soften":
+            needs_review.append({
+                "column": col,
+                "tag": (tags or {}).get(col),
+                "reason": "tag softens this fix — skipped pending review",
+            })
+            continue
+
         original_uniques = fixed[col].nunique(dropna=True)
         lowered = fixed[col].astype(str).str.strip().str.lower()
         # only apply if it actually merges categories
@@ -199,6 +252,8 @@ def fix_mixed_casing(df):
         "fix": "mixed_casing",
         "action": "lowercased + trimmed text so equivalent categories merge",
         "columns_changed": changed,
+        "skipped": skipped,
+        "needs_review": needs_review,
         "applied": len(changed) > 0,
     }
 
@@ -206,16 +261,20 @@ def fix_mixed_casing(df):
 # ---------------------------------------------------------------------------
 # 7. NUMERIC OUTLIERS  ->  cap (winsorise), don't delete
 # ---------------------------------------------------------------------------
-def fix_numeric_outliers(df, protect=()):
+def fix_numeric_outliers(df, protect=(), tags=None):
     """
     IQR rule (same as your check): anything outside
     [Q1 - 1.5*IQR, Q3 + 1.5*IQR] is an outlier.
 
     We CAP rather than DELETE, because deleting rows throws away every other
     column's data for that row. Capping keeps the row and tames the extreme.
+
+    Geographic / identifier / temporal tags forbid capping.
+    Monetary softens (skipped pending review).
     """
     fixed = df.copy()
     capped = []
+    skipped, needs_review = [], []
 
     for col in fixed.columns:
         if col in protect or not pd.api.types.is_numeric_dtype(fixed[col]):
@@ -231,6 +290,19 @@ def fix_numeric_outliers(df, protect=()):
         if n_out == 0:
             continue
 
+        # Tag gate only when we would otherwise act on this column.
+        decision = _decide("numeric_outliers", col, tags)
+        if decision == "forbid":
+            skipped.append(_skip_entry(col, tags))
+            continue
+        if decision == "soften":
+            needs_review.append({
+                "column": col,
+                "tag": (tags or {}).get(col),
+                "reason": "tag softens this fix — skipped pending review",
+            })
+            continue
+
         fixed[col] = fixed[col].clip(lower=low, upper=high)
         capped.append({
             "column": col,
@@ -243,6 +315,8 @@ def fix_numeric_outliers(df, protect=()):
         "fix": "numeric_outliers",
         "action": "capped extreme values to the IQR fence (kept the rows)",
         "columns_capped": capped,
+        "skipped": skipped,
+        "needs_review": needs_review,
         "applied": len(capped) > 0,
     }
 
@@ -250,10 +324,11 @@ def fix_numeric_outliers(df, protect=()):
 # ---------------------------------------------------------------------------
 # 8. HIGH CORRELATION  ->  drop one of each redundant pair
 # ---------------------------------------------------------------------------
-def fix_high_correlation(df, threshold=0.9, protect=()):
+def fix_high_correlation(df, threshold=0.9, protect=(), tags=None):
     """
     If two features are ~the same information (corr >= 0.9), keep one.
     Drops the SECOND of each pair. Never drops the target.
+    `tags` accepted for a uniform signature; correlation drop is not tag-gated.
     """
     numeric = df.select_dtypes(include=[np.number])
     numeric = numeric.drop(columns=[c for c in protect if c in numeric.columns],
@@ -280,6 +355,8 @@ def fix_high_correlation(df, threshold=0.9, protect=()):
         "action": f"dropped one column from each pair correlated >= {threshold}",
         "pairs": pairs,
         "columns_dropped": dropped,
+        "skipped": [],
+        "needs_review": [],
         "applied": len(dropped) > 0,
     }
 
@@ -288,16 +365,22 @@ def fix_high_correlation(df, threshold=0.9, protect=()):
 # 9. CLASS IMBALANCE  ->  synthetic minority rows (SDV)
 #    (the one you already built — folded in here, LAST in the order)
 # ---------------------------------------------------------------------------
-def fix_class_imbalance(df, target_col, target_ratio=1.5):
-    """Generate synthetic minority-class rows until ratio <= target_ratio."""
+def fix_class_imbalance(df, target_col, target_ratio=1.5, tags=None):
+    """Generate synthetic minority-class rows until ratio <= target_ratio.
+
+    Identifier / temporal columns are dropped from the frame handed to the
+    synthesizer so we never invent IDs or timestamps. Rejoined as NaN on new rows.
+    """
     if target_col is None or target_col not in df.columns:
         return df.copy(), {"fix": "class_imbalance", "applied": False,
-                           "reason": "no valid target column"}
+                           "reason": "no valid target column",
+                           "skipped": [], "needs_review": []}
 
     counts = df[target_col].value_counts(dropna=False)
     if len(counts) < 2:
         return df.copy(), {"fix": "class_imbalance", "applied": False,
-                           "reason": "target has fewer than 2 classes"}
+                           "reason": "target has fewer than 2 classes",
+                           "skipped": [], "needs_review": []}
 
     majority_count, minority_count = int(counts.iloc[0]), int(counts.iloc[-1])
     minority_class = counts.index[-1]
@@ -306,25 +389,51 @@ def fix_class_imbalance(df, target_col, target_ratio=1.5):
     if current_ratio <= target_ratio:
         return df.copy(), {"fix": "class_imbalance", "applied": False,
                            "reason": "already balanced",
-                           "ratio_before": round(current_ratio, 2)}
+                           "ratio_before": round(current_ratio, 2),
+                           "skipped": [], "needs_review": []}
 
     minority_df = df[df[target_col] == minority_class]
     if len(minority_df) < 2:
         return df.copy(), {"fix": "class_imbalance", "applied": False,
-                           "reason": "not enough minority rows to learn from"}
+                           "reason": "not enough minority rows to learn from",
+                           "skipped": [], "needs_review": []}
 
     desired = int(np.ceil(majority_count / target_ratio))
     n_generate = desired - minority_count
+
+    # Prefer dropping identifier/temporal columns from the synthesizer input
+    # rather than inventing values for them.
+    drop_for_synth = []
+    skipped = []
+    if tags:
+        for col, tag in tags.items():
+            if col == target_col or col not in minority_df.columns:
+                continue
+            if tag in ("identifier", "temporal"):
+                drop_for_synth.append(col)
+                skipped.append({
+                    "column": col,
+                    "tag": tag,
+                    "reason": "excluded from synthesizer (do not invent this column)",
+                })
+
+    synth_source = minority_df.drop(columns=drop_for_synth, errors="ignore")
 
     # import here so the module still loads if sdv isn't installed
     from sdv.metadata import Metadata
     from sdv.single_table import GaussianCopulaSynthesizer
 
-    metadata = Metadata.detect_from_dataframe(minority_df)
+    metadata = Metadata.detect_from_dataframe(synth_source)
     synth = GaussianCopulaSynthesizer(metadata)
-    synth.fit(minority_df)
+    synth.fit(synth_source)
     new_rows = synth.sample(num_rows=n_generate)
     new_rows[target_col] = minority_class
+    for col in drop_for_synth:
+        if col not in new_rows.columns:
+            new_rows[col] = np.nan
+
+    # Align columns with original before concat
+    new_rows = new_rows.reindex(columns=df.columns)
 
     fixed = pd.concat([df, new_rows], ignore_index=True)
     fixed = fixed.sample(frac=1, random_state=42).reset_index(drop=True)
@@ -337,6 +446,9 @@ def fix_class_imbalance(df, target_col, target_ratio=1.5):
         "synthetic_rows_added": int(n_generate),
         "ratio_before": round(current_ratio, 2),
         "ratio_after": round(float(new_counts.iloc[0] / new_counts.iloc[-1]), 2),
+        "skipped": skipped,
+        "needs_review": [],
+        "synth_columns_excluded": drop_for_synth,
         "applied": True,
     }
 
@@ -357,11 +469,12 @@ FIX_ORDER = [
 ]
 
 
-def apply_fixes(df, target_col=None, selected=None, target_ratio=1.5):
+def apply_fixes(df, target_col=None, selected=None, target_ratio=1.5, tags=None):
     """
     Apply fixes in the correct order.
 
     selected : list of fix names to run. None = run all of them.
+    tags     : optional confirmed semantic tags (column -> tag).
     Returns (fixed_df, logs) where logs is a list of per-fix dicts.
     """
     protect = (target_col,) if target_col else ()
@@ -375,7 +488,7 @@ def apply_fixes(df, target_col=None, selected=None, target_ratio=1.5):
             continue
 
         if name == "mixed_casing":
-            fixed, log = fix_mixed_casing(fixed)
+            fixed, log = fix_mixed_casing(fixed, tags=tags)
         elif name == "duplicate_rows":
             fixed, log = fix_duplicate_rows(fixed)
         elif name == "constant_column":
@@ -385,13 +498,15 @@ def apply_fixes(df, target_col=None, selected=None, target_ratio=1.5):
         elif name == "high_cardinality":
             fixed, log = fix_high_cardinality(fixed, protect=protect)
         elif name == "missing_values":
-            fixed, log = fix_missing_values(fixed, protect=protect)
+            fixed, log = fix_missing_values(fixed, protect=protect, tags=tags)
         elif name == "high_correlation":
-            fixed, log = fix_high_correlation(fixed, protect=protect)
+            fixed, log = fix_high_correlation(fixed, protect=protect, tags=tags)
         elif name == "numeric_outliers":
-            fixed, log = fix_numeric_outliers(fixed, protect=protect)
+            fixed, log = fix_numeric_outliers(fixed, protect=protect, tags=tags)
         elif name == "class_imbalance":
-            fixed, log = fix_class_imbalance(fixed, target_col, target_ratio)
+            fixed, log = fix_class_imbalance(
+                fixed, target_col, target_ratio, tags=tags
+            )
         else:
             continue
 

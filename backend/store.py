@@ -55,6 +55,9 @@ def create_dataset(df: pd.DataFrame, filename: str) -> dict:
         "original_df": original,
         "current_df": original.copy(),
         "target_col": None,
+        # Confirmed semantic tags: column -> tag string. Empty until the user saves.
+        # Survives target changes and reset (tags describe columns, not fixes).
+        "tags": {},
         "history": [],
         "round_num": 1,
         "filename": filename,
@@ -95,8 +98,37 @@ def reset_dataset(dataset_id: str) -> dict:
     entry["current_df"] = entry["original_df"].copy()
     entry["history"] = []
     entry["round_num"] = 1
+    # tags intentionally preserved
     invalidate_preview_cache(dataset_id)
     return entry
+
+
+def get_tags(dataset_id: str) -> dict[str, str]:
+    entry = get_entry(dataset_id)
+    return dict(entry.get("tags") or {})
+
+
+def set_tags(dataset_id: str, tags: dict[str, str]) -> dict[str, str]:
+    entry = get_entry(dataset_id)
+    entry["tags"] = {str(k): str(v) for k, v in tags.items()}
+    invalidate_preview_cache(dataset_id)
+    return dict(entry["tags"])
+
+
+def clear_column_tag(dataset_id: str, column: str) -> dict[str, str]:
+    entry = get_entry(dataset_id)
+    tags = dict(entry.get("tags") or {})
+    tags.pop(column, None)
+    entry["tags"] = tags
+    invalidate_preview_cache(dataset_id)
+    return dict(tags)
+
+
+def tags_cache_key(tags: dict | None) -> str:
+    """Stable fingerprint so preview cache invalidates when tags change."""
+    if not tags:
+        return ""
+    return "|".join(f"{k}={tags[k]}" for k in sorted(tags))
 
 
 def apply_one_fix(
@@ -121,8 +153,13 @@ def apply_one_fix(
     return entry
 
 
-def get_preview_cache(dataset_id: str, round_num: int, target_ratio: float) -> list | None:
-    return _PREVIEW_CACHE.get((dataset_id, round_num, float(target_ratio)))
+def get_preview_cache(
+    dataset_id: str,
+    round_num: int,
+    target_ratio: float,
+    tags_key: str = "",
+) -> list | None:
+    return _PREVIEW_CACHE.get((dataset_id, round_num, float(target_ratio), tags_key))
 
 
 def set_preview_cache(
@@ -130,5 +167,6 @@ def set_preview_cache(
     round_num: int,
     target_ratio: float,
     previews: list,
+    tags_key: str = "",
 ) -> None:
-    _PREVIEW_CACHE[(dataset_id, round_num, float(target_ratio))] = previews
+    _PREVIEW_CACHE[(dataset_id, round_num, float(target_ratio), tags_key)] = previews

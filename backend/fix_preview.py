@@ -182,25 +182,40 @@ def verdict_for(costs, warnings):
 # PREVIEW: run each fix in isolation, report gain AND cost
 # ---------------------------------------------------------------------------
 SINGLE_FIXES = {
-    "mixed_casing":         lambda d, t, r: fx.fix_mixed_casing(d),
-    "duplicate_rows":       lambda d, t, r: fx.fix_duplicate_rows(d),
-    "constant_column":      lambda d, t, r: fx.fix_constant_columns(d, protect=(t,) if t else ()),
-    "near_constant_column": lambda d, t, r: fx.fix_near_constant_columns(d, protect=(t,) if t else ()),
-    "high_cardinality":     lambda d, t, r: fx.fix_high_cardinality(d, protect=(t,) if t else ()),
-    "missing_values":       lambda d, t, r: fx.fix_missing_values(d, protect=(t,) if t else ()),
-    "high_correlation":     lambda d, t, r: fx.fix_high_correlation(d, protect=(t,) if t else ()),
-    "numeric_outliers":     lambda d, t, r: fx.fix_numeric_outliers(d, protect=(t,) if t else ()),
-    "class_imbalance":      lambda d, t, r: fx.fix_class_imbalance(d, t, target_ratio=r),
+    "mixed_casing": lambda d, t, r, tags=None: fx.fix_mixed_casing(d, tags=tags),
+    "duplicate_rows": lambda d, t, r, tags=None: fx.fix_duplicate_rows(d),
+    "constant_column": lambda d, t, r, tags=None: fx.fix_constant_columns(
+        d, protect=(t,) if t else ()
+    ),
+    "near_constant_column": lambda d, t, r, tags=None: fx.fix_near_constant_columns(
+        d, protect=(t,) if t else ()
+    ),
+    "high_cardinality": lambda d, t, r, tags=None: fx.fix_high_cardinality(
+        d, protect=(t,) if t else ()
+    ),
+    "missing_values": lambda d, t, r, tags=None: fx.fix_missing_values(
+        d, protect=(t,) if t else (), tags=tags
+    ),
+    "high_correlation": lambda d, t, r, tags=None: fx.fix_high_correlation(
+        d, protect=(t,) if t else (), tags=tags
+    ),
+    "numeric_outliers": lambda d, t, r, tags=None: fx.fix_numeric_outliers(
+        d, protect=(t,) if t else (), tags=tags
+    ),
+    "class_imbalance": lambda d, t, r, tags=None: fx.fix_class_imbalance(
+        d, t, target_ratio=r, tags=tags
+    ),
 }
 
 
 def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
-                  selected=None, target_ratio=1.5):
+                  selected=None, target_ratio=1.5, tags=None):
     """
     For each applicable fix, apply it IN ISOLATION to the original data and
     report: what it resolves, what the score becomes, and what it costs.
 
     Nothing is applied permanently — this is a preview.
+    `tags` are confirmed semantic tags; when present, fixes skip forbidden columns.
     """
     issues_before = run_quality_checks(df, target_col)
     score_before = compute_ai_ready_score(issues_before)
@@ -216,12 +231,14 @@ def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
             continue
 
         try:
-            fixed, log = SINGLE_FIXES[name](df, target_col, target_ratio)
+            fixed, log = SINGLE_FIXES[name](df, target_col, target_ratio, tags)
         except Exception as e:
             previews.append({"fix": name, "error": str(e)})
             continue
 
-        if not log.get("applied"):
+        skipped = log.get("skipped") or []
+        # Still show a card when the only outcome is tag protection.
+        if not log.get("applied") and not skipped:
             continue
 
         issues_after = run_quality_checks(fixed, target_col)
@@ -232,6 +249,12 @@ def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
         created = sorted(checks_after - checks_present)
 
         costs, warnings = measure_cost(df, fixed)
+
+        protected = [
+            {"column": item.get("column"), "tag": item.get("tag")}
+            for item in skipped
+            if item.get("column")
+        ]
 
         previews.append({
             "fix": name,
@@ -244,6 +267,8 @@ def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
             "costs": costs,
             "warnings": warnings,
             "verdict": verdict_for(costs, warnings),
+            "protected": protected,
+            "needs_review": log.get("needs_review") or [],
         })
 
     return previews

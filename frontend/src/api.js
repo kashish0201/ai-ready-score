@@ -74,3 +74,15 @@ export async function resetDataset(datasetId) {
 export async function downloadDatasetCsv(datasetId) {
   return request(`/api/datasets/${datasetId}/download`, { expectBlob: true });
 }
+
+export async function getDatasetTags(datasetId) {
+  return request(`/api/datasets/${datasetId}/tags`);
+}
+
+export async function saveDatasetTags(datasetId, tags) {
+  return request(`/api/datasets/${datasetId}/tags`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+}
