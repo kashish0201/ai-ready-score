@@ -390,11 +390,29 @@ def compute_ai_ready_score(issues_df):
             "summary": "No major data quality issues were detected. The dataset appears highly ready for AI/ML training."
         }
 
-    for _, row in issues_df.iterrows():
-        severity = row["severity"]
-        score = score - penalties.get(severity, 0)
+    weights = {
+        "missing_values": 4.0,
+        "duplicate_rows": 3.0,
+        "constant_column": 2.0,
+        "near_constant_column": 1.0,
+        "high_cardinality": 2.0,
+        "class_imbalance": 4.0,
+        "numeric_outliers": 1.5,
+        "high_correlation": 2.0,
+        "mixed_casing": 1.0,
+    }
 
-    score = max(score, 0)
+    total_penalty = 0
+
+    severity_to_number = {"low": 1, "medium": 2, "high": 3}
+
+    for check_type, group in issues_df.groupby("check"):
+        count = len(group)
+        worst = group["severity"].map(severity_to_number).max()
+        penalty = weights[check_type] * worst * np.log1p(count)
+        total_penalty += penalty
+
+    score = max(0, 100 - total_penalty)
 
     high_count = int((issues_df["severity"] == "high").sum())
     medium_count = int((issues_df["severity"] == "medium").sum())

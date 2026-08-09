@@ -40,3 +40,15 @@ def test_compute_ai_ready_score_empty():
     ]))
     assert result["score"] == 100
     assert result["grade"] == "Excellent"
+
+
+def test_compute_ai_ready_score_handles_every_check_type():
+    issues = pd.DataFrame([
+        {"check": "high_correlation", "severity": "medium"},
+        {"check": "mixed_casing", "severity": "low"},
+    ])
+
+    result = compute_ai_ready_score(issues)
+
+    assert 0 <= result["score"] < 100
+    assert result["total_issues"] == 2
