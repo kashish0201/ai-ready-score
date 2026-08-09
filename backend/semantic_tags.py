@@ -29,10 +29,10 @@ import pandas as pd
 
 # name hints are used only as CONFIRMATION alongside value evidence,
 # never on their own (except monetary, which is value-ambiguous).
-GEO_LAT_HINT = re.compile(r"(lat|latitude|breite)", re.I)
-GEO_LON_HINT = re.compile(r"(lon|lng|long|longitude|lange)", re.I)
-GEO_ANY_HINT = re.compile(r"(lat|lon|lng|long|coord|geo)", re.I)
-ID_HINT      = re.compile(r"(^id$|_id$|uuid|guid|\bkey\b|code|hash|ride_id)", re.I)
+GEO_LAT_HINT = re.compile(r"(\blat\b|latitude\b|breite\b)", re.I)
+GEO_LON_HINT = re.compile(r"(\blon\b|\blng\b|\blong\b|\blongitude\b|\blange\b)", re.I)
+GEO_ANY_HINT = re.compile(r"(\blat\b|\blatitude\b|\bbreite\b|\blon\b|\blng\b|\blong\b|\blongitude\b|\blange\b|\bcoord\b|\bgeo\b)", re.I)
+ID_HINT = re.compile(r"(^id$|_id$|\buuid\b|\bguid\b|\bkey\b|\bcode\b|\bhash\b)", re.I)
 MONEY_HINT   = re.compile(r"(price|cost|amount|revenue|salary|pay|fee|charge|usd|eur|gbp|\$)", re.I)
 
 
