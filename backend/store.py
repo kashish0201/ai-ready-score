@@ -21,12 +21,12 @@ TTL = timedelta(hours=1)
 TARGET_UNIQUE_LIMIT = 20
 
 
-def _now() -> datetime:
+def current_time() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _evict_stale() -> None:
-    cutoff = _now() - TTL
+def evict_stale() -> None:
+    cutoff = current_time() - TTL
     stale = [did for did, entry in _DATASETS.items() if entry["created_at"] < cutoff]
     for did in stale:
         _DATASETS.pop(did, None)
@@ -48,7 +48,7 @@ def target_candidates(df: pd.DataFrame, max_uniques: int = TARGET_UNIQUE_LIMIT) 
 
 
 def create_dataset(df: pd.DataFrame, filename: str) -> dict:
-    _evict_stale()
+    evict_stale()
     dataset_id = str(uuid4())
     original = df.copy()
     entry = {
@@ -61,7 +61,7 @@ def create_dataset(df: pd.DataFrame, filename: str) -> dict:
         "history": [],
         "round_num": 1,
         "filename": filename,
-        "created_at": _now(),
+        "created_at": current_time(),
         "original_score": None,
     }
     _DATASETS[dataset_id] = entry
@@ -75,7 +75,7 @@ def create_dataset(df: pd.DataFrame, filename: str) -> dict:
 
 
 def get_entry(dataset_id: str) -> dict:
-    _evict_stale()
+    evict_stale()
     entry = _DATASETS.get(dataset_id)
     if entry is None:
         raise KeyError(dataset_id)

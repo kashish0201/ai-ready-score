@@ -1,17 +1,45 @@
+from io import BytesIO
+
 import pandas as pd
+import pytest
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend.main import MAX_UPLOAD_BYTES, app, validate_upload_size
 
 client = TestClient(app)
 
 
-def _csv_bytes(df: pd.DataFrame) -> bytes:
+def test_upload_size_over_200_mb_is_rejected():
+    upload_file = UploadFile(
+        filename="large.csv",
+        file=BytesIO(b""),
+        size=MAX_UPLOAD_BYTES + 1,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        validate_upload_size(upload_file)
+
+    assert exc.value.status_code == 413
+    assert exc.value.detail == "CSV file exceeds the 200 MB upload limit"
+
+
+def test_upload_size_exactly_200_mb_is_accepted():
+    upload_file = UploadFile(
+        filename="limit.csv",
+        file=BytesIO(b""),
+        size=MAX_UPLOAD_BYTES,
+    )
+
+    validate_upload_size(upload_file)
+
+
+def csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def _upload(df: pd.DataFrame, name: str = "data.csv") -> str:
-    files = {"file": (name, _csv_bytes(df), "text/csv")}
+def upload(df: pd.DataFrame, name: str = "data.csv") -> str:
+    files = {"file": (name, csv_bytes(df), "text/csv")}
     res = client.post("/api/datasets", files=files)
     assert res.status_code == 200, res.text
     return res.json()["dataset_id"]
@@ -22,7 +50,7 @@ def test_upload_returns_target_candidates():
         "id": [f"r{i}" for i in range(25)],
         "label": [0] * 20 + [1] * 5,
     })
-    files = {"file": ("data.csv", _csv_bytes(df), "text/csv")}
+    files = {"file": ("data.csv", csv_bytes(df), "text/csv")}
     res = client.post("/api/datasets", files=files)
     assert res.status_code == 200
     body = res.json()
@@ -33,7 +61,7 @@ def test_upload_returns_target_candidates():
 
 def test_score_and_preview_after_target():
     df = pd.DataFrame({"x": list(range(20)), "y": [0] * 18 + [1] * 2})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
 
     res = client.put(
         f"/api/datasets/{dataset_id}/target",
@@ -54,7 +82,7 @@ def test_score_and_preview_after_target():
 
 def test_apply_one_fix_updates_history_and_round():
     df = pd.DataFrame({"x": [1, 1, 2], "y": [0, 0, 1]})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
     client.put(f"/api/datasets/{dataset_id}/target", json={"target_col": None})
 
     res = client.post(
@@ -71,7 +99,7 @@ def test_apply_one_fix_updates_history_and_round():
 
 def test_apply_unknown_fix_returns_400():
     df = pd.DataFrame({"x": [1, 2], "y": [0, 1]})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
     client.put(f"/api/datasets/{dataset_id}/target", json={"target_col": "y"})
     res = client.post(
         f"/api/datasets/{dataset_id}/apply",
@@ -82,7 +110,7 @@ def test_apply_unknown_fix_returns_400():
 
 def test_apply_inapplicable_fix_returns_400():
     df = pd.DataFrame({"x": [1, 2, 3], "y": [0, 1, 0]})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
     client.put(f"/api/datasets/{dataset_id}/target", json={"target_col": "y"})
     res = client.post(
         f"/api/datasets/{dataset_id}/apply",
@@ -98,7 +126,7 @@ def test_unknown_dataset_returns_404():
 
 def test_reset_restores_original():
     df = pd.DataFrame({"x": [1, 1, 2], "y": [0, 0, 1]})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
     client.put(f"/api/datasets/{dataset_id}/target", json={"target_col": None})
     client.post(
         f"/api/datasets/{dataset_id}/apply",
@@ -114,7 +142,7 @@ def test_reset_restores_original():
 
 def test_download_returns_csv():
     df = pd.DataFrame({"x": [1, 2], "y": [0, 1]})
-    dataset_id = _upload(df)
+    dataset_id = upload(df)
     res = client.get(f"/api/datasets/{dataset_id}/download")
     assert res.status_code == 200
     assert "text/csv" in res.headers["content-type"]

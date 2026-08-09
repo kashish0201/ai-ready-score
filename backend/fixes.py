@@ -22,13 +22,13 @@ import pandas as pd
 from semantic_tags import fix_allowed
 
 
-def _column_tag(tags, column):
+def column_tag(tags, column):
     if not tags:
         return None
     return tags.get(column)
 
 
-def _skip_entry(column, tags):
+def skip_entry(column, tags):
     return {
         "column": column,
         "tag": (tags or {}).get(column),
@@ -36,11 +36,11 @@ def _skip_entry(column, tags):
     }
 
 
-def _decide(fix_name, column, tags):
+def decide_fix(fix_name, column, tags):
     """Return allow | soften | forbid. tags=None => always allow."""
     if tags is None:
         return "allow"
-    return fix_allowed(fix_name, _column_tag(tags, column))
+    return fix_allowed(fix_name, column_tag(tags, column))
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +166,9 @@ def fix_missing_values(df, drop_threshold=0.5, protect=(), tags=None):
         if n_missing == 0:
             continue
 
-        decision = _decide("missing_values", col, tags)
+        decision = decide_fix("missing_values", col, tags)
         if decision == "forbid":
-            skipped.append(_skip_entry(col, tags))
+            skipped.append(skip_entry(col, tags))
             continue
         if decision == "soften":
             needs_review.append({
@@ -225,9 +225,9 @@ def fix_mixed_casing(df, tags=None):
         if not pd.api.types.is_object_dtype(fixed[col]):
             continue
 
-        decision = _decide("mixed_casing", col, tags)
+        decision = decide_fix("mixed_casing", col, tags)
         if decision == "forbid":
-            skipped.append(_skip_entry(col, tags))
+            skipped.append(skip_entry(col, tags))
             continue
         if decision == "soften":
             needs_review.append({
@@ -291,9 +291,9 @@ def fix_numeric_outliers(df, protect=(), tags=None):
             continue
 
         # Tag gate only when we would otherwise act on this column.
-        decision = _decide("numeric_outliers", col, tags)
+        decision = decide_fix("numeric_outliers", col, tags)
         if decision == "forbid":
-            skipped.append(_skip_entry(col, tags))
+            skipped.append(skip_entry(col, tags))
             continue
         if decision == "soften":
             needs_review.append({

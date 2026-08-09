@@ -11,7 +11,7 @@ from semantic_tags import propose_tags
 client = TestClient(app)
 
 
-def _divvy_like(n=200, seed=0):
+def divvy_like(n=200, seed=0):
     """Small frame shaped like Divvy trip data for tag / outlier tests."""
     rng = np.random.default_rng(seed)
     # Clustered Chicago coords + strong extremes so IQR capping shifts the mean.
@@ -51,19 +51,19 @@ def _divvy_like(n=200, seed=0):
     })
 
 
-def _csv_bytes(df: pd.DataFrame) -> bytes:
+def csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def _upload(df: pd.DataFrame) -> str:
-    files = {"file": ("divvy.csv", _csv_bytes(df), "text/csv")}
+def upload(df: pd.DataFrame) -> str:
+    files = {"file": ("divvy.csv", csv_bytes(df), "text/csv")}
     res = client.post("/api/datasets", files=files)
     assert res.status_code == 200, res.text
     return res.json()["dataset_id"]
 
 
 def test_propose_tags_divvy_like_columns():
-    df = _divvy_like()
+    df = divvy_like()
     proposed = propose_tags(df)
 
     assert proposed["start_lat"]["tag"] == "geographic"
@@ -85,7 +85,7 @@ def test_propose_tags_divvy_like_columns():
 
 
 def test_numeric_outliers_skips_geographic_when_tagged():
-    df = _divvy_like()
+    df = divvy_like()
     tags = {
         "start_lat": "geographic",
         "start_lng": "geographic",
@@ -109,7 +109,7 @@ def test_numeric_outliers_skips_geographic_when_tagged():
 
 
 def test_missing_values_skips_geographic_when_tagged():
-    df = _divvy_like()
+    df = divvy_like()
     df.loc[0:9, "end_lat"] = np.nan
     df.loc[0:9, "end_lng"] = np.nan
     tags = {"end_lat": "geographic", "end_lng": "geographic"}
@@ -125,7 +125,7 @@ def test_missing_values_skips_geographic_when_tagged():
 
 
 def test_tags_none_matches_untagged_behavior():
-    df = _divvy_like()
+    df = divvy_like()
     fixed_a, log_a = fix_numeric_outliers(df, tags=None)
     fixed_b, log_b = fix_numeric_outliers(df)
     pd.testing.assert_frame_equal(fixed_a, fixed_b)
@@ -133,8 +133,8 @@ def test_tags_none_matches_untagged_behavior():
 
 
 def test_api_tags_preview_protection():
-    df = _divvy_like()
-    dataset_id = _upload(df)
+    df = divvy_like()
+    dataset_id = upload(df)
     client.put(f"/api/datasets/{dataset_id}/target", json={"target_col": "member_casual"})
 
     tags_res = client.get(f"/api/datasets/{dataset_id}/tags")
@@ -188,8 +188,8 @@ def test_api_tags_preview_protection():
 
 
 def test_put_unknown_tag_returns_400():
-    df = _divvy_like(n=30)
-    dataset_id = _upload(df)
+    df = divvy_like(n=30)
+    dataset_id = upload(df)
     res = client.put(
         f"/api/datasets/{dataset_id}/tags",
         json={"tags": {"ride_id": "not_a_real_tag"}},
@@ -198,8 +198,8 @@ def test_put_unknown_tag_returns_400():
 
 
 def test_delete_tag_and_tags_survive_reset():
-    df = _divvy_like(n=30)
-    dataset_id = _upload(df)
+    df = divvy_like(n=30)
+    dataset_id = upload(df)
     client.put(
         f"/api/datasets/{dataset_id}/tags",
         json={"tags": {"ride_id": "identifier", "start_lat": "geographic"}},

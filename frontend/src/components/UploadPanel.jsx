@@ -20,22 +20,32 @@ export default function UploadPanel({
         {fileName ? fileName : "drop CSV or browse"}
       </label>
       <div className="row">
-        <select
-          value={targetCol || ""}
-          onChange={(e) => onTargetChange(e.target.value || null)}
-          disabled={!targetCandidates.length}
-        >
-          <option value="">target: none</option>
-          {targetCandidates.map((c) => (
-            <option key={c} value={c}>
-              target: {c}
-            </option>
-          ))}
-        </select>
+        <div className="target-field">
+          <label htmlFor="target-column">Target Column (classification)</label>
+          <select
+            id="target-column"
+            value={targetCol || ""}
+            onChange={(e) => onTargetChange(e.target.value || null)}
+            disabled={!targetCandidates.length}
+          >
+            <option value="">None</option>
+            {targetCandidates.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
         <button type="button" onClick={onRun} disabled={!fileName || loading}>
           {loading ? "Loading…" : "Run analysis"}
         </button>
       </div>
+      {fileName && targetCandidates.length === 0 && (
+        <p className="target-empty-message">
+          No classification targets detected. This tool currently supports
+          classification tasks.
+        </p>
+      )}
       <p className="muted" style={{ marginTop: "0.55rem", marginBottom: 0 }}>
         Target options are categorical-ish columns (≤20 unique values). Changing
         the target resets applied fixes.

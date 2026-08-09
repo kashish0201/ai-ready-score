@@ -36,11 +36,11 @@ ID_HINT = re.compile(r"(^id$|_id$|\buuid\b|\bguid\b|\bkey\b|\bcode\b|\bhash\b)",
 MONEY_HINT   = re.compile(r"(price|cost|amount|revenue|salary|pay|fee|charge|usd|eur|gbp|\$)", re.I)
 
 
-def _clean_numeric(series):
+def clean_numeric(series):
     return pd.to_numeric(series, errors="coerce").dropna()
 
 
-def _looks_like_dates(series, sample_size=500):
+def looks_like_dates(series, sample_size=500):
     """Try parsing a sample as datetimes; return the success fraction."""
     sample = series.dropna().astype(str).head(sample_size)
     if len(sample) == 0:
@@ -49,7 +49,7 @@ def _looks_like_dates(series, sample_size=500):
     return parsed.notna().mean()
 
 
-def _propose_for_column(name, series):
+def propose_for_column(name, series):
     """Return (tag, confidence, reason) or None if no strong signal."""
     non_null = series.dropna()
     if len(non_null) == 0:
@@ -64,7 +64,7 @@ def _propose_for_column(name, series):
     # rule (>=95% unique) would otherwise swallow them. A column that parses as
     # dates is temporal even if nearly every value is distinct.
     if not is_numeric:
-        date_frac = _looks_like_dates(series)
+        date_frac = looks_like_dates(series)
         if date_frac >= 0.9:
             return ("temporal", "high",
                     f"{date_frac:.0%} of values parse as dates")
@@ -78,7 +78,7 @@ def _propose_for_column(name, series):
 
     # --- GEOGRAPHIC: value range + name hint (require BOTH) --------------
     if is_numeric:
-        vals = _clean_numeric(series)
+        vals = clean_numeric(series)
         if len(vals) > 0:
             in_lat = vals.between(-90, 90).mean()
             in_lon = vals.between(-180, 180).mean()
@@ -97,14 +97,14 @@ def _propose_for_column(name, series):
 
     # --- MONETARY: name hint + non-negative numeric ----------------------
     if is_numeric and MONEY_HINT.search(name):
-        vals = _clean_numeric(series)
+        vals = clean_numeric(series)
         if len(vals) > 0 and (vals >= 0).mean() >= 0.99:
             return ("monetary", "medium",
                     "money-like name with non-negative values")
 
     # --- CATEGORICAL CODE: integer, low cardinality, name hint ----------
     if is_numeric:
-        vals = _clean_numeric(series)
+        vals = clean_numeric(series)
         if len(vals) > 0:
             all_int = (vals == vals.round()).mean() >= 0.99
             low_card = uniqueness < 0.05
@@ -131,7 +131,7 @@ def propose_tags(df):
     """
     proposals = {}
     for col in df.columns:
-        result = _propose_for_column(str(col), df[col])
+        result = propose_for_column(str(col), df[col])
         if result is not None:
             tag, confidence, reason = result
             proposals[col] = {"tag": tag, "confidence": confidence, "reason": reason}
