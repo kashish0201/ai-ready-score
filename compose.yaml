@@ -1,4 +1,5 @@
-# Compatible with Podman Compose (`podman compose up --build`) and Docker Compose.
+# Local development (hot reload). For production: compose.prod.yaml
+# Usage: podman compose up --build
 services:
   backend:
     build:

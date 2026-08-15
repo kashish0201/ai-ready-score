@@ -1,0 +1,25 @@
+# Production stack (Podman/Docker).
+# Usage: podman compose -f compose.prod.yaml up --build -d
+#
+# Browser → :80 (nginx) → static UI + /api proxied to backend
+# Backend is not published on the host (same-origin via nginx).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    # No source mounts, no --reload — image CMD runs uvicorn as-is
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
