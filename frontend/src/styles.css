@@ -302,6 +302,23 @@ button:disabled {
   text-align: left;
 }
 
+.score-target-hint {
+  color: #a7f3d0;
+  font-size: 0.88rem;
+  text-align: left;
+  margin: 0 0 0.85rem;
+  line-height: 1.45;
+}
+
+.score-partial-label {
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.35rem;
+}
+
 .fade-in {
   animation: fadeIn 0.4s ease;
 }

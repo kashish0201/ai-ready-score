@@ -42,6 +42,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [scoreState, setScoreState] = useState(null);
   const [previews, setPreviews] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
   const [targetRatio, setTargetRatio] = useState(1.5);
   const [activeTab, setActiveTab] = useState("dataset");
   const [proposedTags, setProposedTags] = useState({});
@@ -50,10 +51,54 @@ export default function App() {
   const [tagsSavedAt, setTagsSavedAt] = useState(null);
   const ratioTimer = useRef(null);
   const ratioTouched = useRef(false);
+  const previewRequestId = useRef(0);
 
   function applyScore(body) {
     setScoreState(body);
     if (body.previews) setPreviews(body.previews);
+  }
+
+  async function loadPreviews() {
+    if (!datasetId) return;
+    const requestId = ++previewRequestId.current;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const preview = await getDatasetPreview(datasetId, { targetRatio });
+      if (requestId !== previewRequestId.current) return;
+      setPreviews(preview.previews || []);
+    } catch (err) {
+      if (requestId !== previewRequestId.current) return;
+      setPreviewError(err.message);
+      setPreviews([]);
+    } finally {
+      if (requestId === previewRequestId.current) {
+        setPreviewLoading(false);
+      }
+    }
+  }
+
+  async function refreshClassImbalancePreview() {
+    if (!datasetId) return;
+    const requestId = ++previewRequestId.current;
+    setPreviewLoading(true);
+    try {
+      const preview = await getDatasetPreview(datasetId, {
+        targetRatio,
+        selected: "class_imbalance",
+      });
+      if (requestId !== previewRequestId.current) return;
+      setPreviews((prev) => {
+        const others = (prev || []).filter((p) => p.fix !== "class_imbalance");
+        return [...others, ...(preview.previews || [])];
+      });
+    } catch {
+      // Imbalance may no longer apply after other fixes
+    } finally {
+      if (requestId === previewRequestId.current) {
+        setPreviewLoading(false);
+      }
+    }
   }
 
   async function loadTags(id, columns) {
@@ -69,6 +114,7 @@ export default function App() {
     setError(null);
     setScoreState(null);
     setPreviews(null);
+    setPreviewError(null);
     setTargetCol(null);
     setDatasetId(null);
     setFileName(null);
@@ -86,18 +132,10 @@ export default function App() {
       setDatasetId(body.dataset_id);
       setFileName(body.filename || next.name);
       setTargetCandidates(body.target_candidates || []);
-      setScoreState({
-        overview: body.overview,
-        columns: body.columns,
-        preview_rows: body.preview_rows,
-        score: null,
-        issues: [],
-        history: [],
-        round_num: 1,
-        original_score: null,
-      });
+      applyScore(body);
       await loadTags(body.dataset_id, body.columns);
       setActiveTab("dataset");
+      loadPreviews();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -108,25 +146,25 @@ export default function App() {
   async function runAnalyze() {
     if (!datasetId) return;
     setLoading(true);
-    setPreviewLoading(true);
     setError(null);
+    setPreviews(null);
+    setPreviewError(null);
     ratioTouched.current = false;
+    previewRequestId.current += 1;
     try {
       const scored = await setDatasetTarget(datasetId, targetCol);
       applyScore(scored);
+      setTargetCol(scored.target_col ?? targetCol);
       await loadTags(datasetId, scored.columns);
-      const preview = await getDatasetPreview(datasetId, {
-        targetRatio,
-      });
-      setPreviews(preview.previews || []);
-      setActiveTab("tags");
+      setActiveTab("score");
     } catch (err) {
       setError(err.message);
       setPreviews(null);
+      setPreviewError(null);
     } finally {
       setLoading(false);
-      setPreviewLoading(false);
     }
+    loadPreviews();
   }
 
   async function handleSaveTags() {
@@ -141,10 +179,7 @@ export default function App() {
       await saveDatasetTags(datasetId, tags);
       setTagsSavedAt(Date.now());
       if (scoreState?.score != null) {
-        setPreviewLoading(true);
-        const preview = await getDatasetPreview(datasetId, { targetRatio });
-        setPreviews(preview.previews || []);
-        setPreviewLoading(false);
+        loadPreviews();
       }
     } catch (err) {
       setError(err.message);
@@ -180,22 +215,22 @@ export default function App() {
   async function handleReset() {
     if (!datasetId) return;
     setBusy(true);
-    setPreviewLoading(true);
     setError(null);
+    setPreviews(null);
+    setPreviewError(null);
     ratioTouched.current = false;
+    previewRequestId.current += 1;
     try {
       const scored = await resetDataset(datasetId);
       applyScore(scored);
       await loadTags(datasetId, scored.columns);
-      const preview = await getDatasetPreview(datasetId, { targetRatio });
-      setPreviews(preview.previews || []);
       setActiveTab("score");
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
-      setPreviewLoading(false);
     }
+    loadPreviews();
   }
 
   async function handleDownload() {
@@ -222,22 +257,8 @@ export default function App() {
     if (!ratioTouched.current || !datasetId) return;
 
     if (ratioTimer.current) clearTimeout(ratioTimer.current);
-    ratioTimer.current = setTimeout(async () => {
-      setPreviewLoading(true);
-      try {
-        const preview = await getDatasetPreview(datasetId, {
-          targetRatio,
-          selected: "class_imbalance",
-        });
-        setPreviews((prev) => {
-          const others = (prev || []).filter((p) => p.fix !== "class_imbalance");
-          return [...others, ...(preview.previews || [])];
-        });
-      } catch {
-        // Imbalance may no longer apply after other fixes
-      } finally {
-        setPreviewLoading(false);
-      }
+    ratioTimer.current = setTimeout(() => {
+      refreshClassImbalancePreview();
     }, 500);
 
     return () => {
@@ -246,6 +267,7 @@ export default function App() {
   }, [targetRatio, datasetId]);
 
   const hasAnalysis = Boolean(scoreState?.score != null);
+  const needsTarget = Boolean(scoreState?.needs_target);
   const issueCount = scoreState?.issues?.length ?? 0;
   const fixCount = previews?.length ?? 0;
   const confirmedTagCount = Object.values(tagDraft).filter(Boolean).length;
@@ -267,7 +289,7 @@ export default function App() {
     {
       id: "fixes",
       label: "Fixes",
-      badge: hasAnalysis ? fixCount : null,
+      badge: hasAnalysis ? (previewLoading ? "…" : fixCount) : null,
       disabled: !hasAnalysis,
     },
     {
@@ -288,6 +310,8 @@ export default function App() {
           fileName={fileName}
           targetCandidates={targetCandidates}
           targetCol={targetCol}
+          needsTarget={needsTarget}
+          hasAnalysis={hasAnalysis}
           onTargetChange={setTargetCol}
           onFile={handleFile}
           onRun={runAnalyze}
@@ -306,10 +330,11 @@ export default function App() {
                     columns={scoreState.columns}
                     rows={scoreState.preview_rows}
                   />
-                  {!hasAnalysis && (
+                  {needsTarget && (
                     <p className="muted tab-hint">
-                      Choose a target (optional) and click Run analysis to score
-                      this dataset.
+                      Data quality checks ran on upload. Pick a target column
+                      above and click Score with target to check class imbalance
+                      and get your full readiness score.
                     </p>
                   )}
                 </>
@@ -322,7 +347,7 @@ export default function App() {
                   draft={tagDraft}
                   onChange={handleTagChange}
                   onSave={handleSaveTags}
-                  saving={tagsSaving || previewLoading}
+                  saving={tagsSaving}
                   savedAt={tagsSavedAt}
                 />
               )}
@@ -336,6 +361,7 @@ export default function App() {
                   previews={previews}
                   loading={loading}
                   previewLoading={previewLoading}
+                  previewError={previewError}
                   busy={busy || loading || previewLoading}
                   targetRatio={targetRatio}
                   onTargetRatioChange={handleTargetRatioChange}
@@ -350,14 +376,17 @@ export default function App() {
                     originalScore={scoreState.original_score}
                     roundNum={scoreState.round_num}
                     history={scoreState.history}
+                    needsTarget={needsTarget}
                     busy={busy || loading || previewLoading}
                     onReset={handleReset}
                     onDownload={handleDownload}
                   />
-                  <p className="muted tab-hint">
-                    Review fix costs on the Fixes tab before applying — a higher
-                    score can mean less honest data.
-                  </p>
+                  {!needsTarget && (
+                    <p className="muted tab-hint">
+                      Review fix costs on the Fixes tab before applying — a
+                      higher score can mean less honest data.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

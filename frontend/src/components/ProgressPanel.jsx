@@ -5,6 +5,7 @@ export default function ProgressPanel({
   originalScore,
   roundNum,
   history,
+  needsTarget,
   busy,
   onReset,
   onDownload,
@@ -16,8 +17,18 @@ export default function ProgressPanel({
   return (
     <section className="panel score-panel fade-in">
       <div className="panel-label">progress // round {roundNum}</div>
+      {needsTarget && (
+        <p className="score-target-hint">
+          This is your data quality score. Select a target column and click{" "}
+          <strong>Score with target</strong> to check for class imbalance and
+          get your full AI readiness score.
+        </p>
+      )}
       <div className="score-number">{score.score}</div>
       <div className="score-grade">{score.grade}</div>
+      {needsTarget && (
+        <p className="score-partial-label">partial score · data quality only</p>
+      )}
       <div className="metrics" style={{ marginTop: "0.85rem", textAlign: "left" }}>
         <div className="metric">
           <span>current</span>

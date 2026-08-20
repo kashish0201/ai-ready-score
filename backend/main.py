@@ -126,6 +126,7 @@ def score_payload(entry: dict) -> dict:
         "original_score": entry["original_score"],
         "history": entry["history"],
         "target_col": target,
+        "needs_target": target is None,
         "tags": entry_tags(entry),
         "overview": get_dataset_overview(current),
         "columns": list(current.columns),
@@ -178,15 +179,12 @@ async def create_dataset(file: UploadFile = File(...)):
 
     def create():
         created = store.create_dataset(df, filename)
-        overview = get_dataset_overview(df)
-        return {
-            "dataset_id": created["dataset_id"],
-            "filename": created["filename"],
-            "overview": overview,
-            "columns": created["columns"],
-            "target_candidates": created["target_candidates"],
-            "preview_rows": preview_rows(df),
-        }
+        entry = store.get_entry(created["dataset_id"])
+        payload = score_payload(entry)
+        payload["dataset_id"] = created["dataset_id"]
+        payload["filename"] = filename
+        payload["target_candidates"] = created["target_candidates"]
+        return payload
 
     return to_jsonable(await run_in_threadpool(create))
 

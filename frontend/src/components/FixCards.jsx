@@ -25,14 +25,25 @@ export default function FixCards({
   onTargetRatioChange,
   onApply,
   previewLoading,
+  previewError,
 }) {
   if (loading || previewLoading) {
     return (
       <section className="panel fade-in">
         <div className="panel-label">fix_previews</div>
+        <p className="muted">Measuring the cost of each fix…</p>
+      </section>
+    );
+  }
+
+  if (previewError) {
+    return (
+      <section className="panel fade-in">
+        <div className="panel-label">fix_previews</div>
+        <p className="target-empty-message">{previewError}</p>
         <p className="muted">
-          Measuring the cost of each fix… class imbalance synthesis can take
-          10–60 seconds on larger datasets.
+          Scoring completed — only fix previews failed. Try a smaller sample or
+          refresh the page.
         </p>
       </section>
     );

@@ -365,11 +365,14 @@ def fix_high_correlation(df, threshold=0.9, protect=(), tags=None):
 # 9. CLASS IMBALANCE  ->  synthetic minority rows (SDV)
 #    (the one you already built — folded in here, LAST in the order)
 # ---------------------------------------------------------------------------
-def fix_class_imbalance(df, target_col, target_ratio=1.5, tags=None):
+def fix_class_imbalance(df, target_col, target_ratio=1.5, tags=None, preview=False):
     """Generate synthetic minority-class rows until ratio <= target_ratio.
 
     Identifier / temporal columns are dropped from the frame handed to the
     synthesizer so we never invent IDs or timestamps. Rejoined as NaN on new rows.
+
+    When ``preview=True``, resample minority rows for a fast score estimate.
+    The full dataset uses SDV synthesis when applying a fix.
     """
     if target_col is None or target_col not in df.columns:
         return df.copy(), {"fix": "class_imbalance", "applied": False,
@@ -417,6 +420,30 @@ def fix_class_imbalance(df, target_col, target_ratio=1.5, tags=None):
                     "reason": "excluded from synthesizer (do not invent this column)",
                 })
 
+    if preview:
+        # Fast score/cost estimate — full SDV synthesis runs only on apply.
+        preview_n = min(n_generate, 5000)
+        new_rows = minority_df.sample(n=preview_n, replace=True, random_state=42)
+        fixed = pd.concat([df, new_rows], ignore_index=True)
+        fixed = fixed.sample(frac=1, random_state=42).reset_index(drop=True)
+        new_counts = fixed[target_col].value_counts(dropna=False)
+        est_ratio_after = round(float(majority_count / max(int(new_counts.iloc[-1]), 1)), 2)
+        return fixed, {
+            "fix": "class_imbalance",
+            "action": (
+                f"preview: ~{n_generate} synthetic '{minority_class}' rows "
+                f"(apply runs full SDV synthesis)"
+            ),
+            "synthetic_rows_added": int(n_generate),
+            "ratio_before": round(current_ratio, 2),
+            "ratio_after": est_ratio_after,
+            "skipped": skipped,
+            "needs_review": ["preview uses resampling; apply runs full SDV synthesis"],
+            "synth_columns_excluded": drop_for_synth,
+            "applied": True,
+            "preview_mode": True,
+        }
+
     synth_source = minority_df.drop(columns=drop_for_synth, errors="ignore")
 
     # import here so the module still loads if sdv isn't installed
@@ -450,6 +477,7 @@ def fix_class_imbalance(df, target_col, target_ratio=1.5, tags=None):
         "needs_review": [],
         "synth_columns_excluded": drop_for_synth,
         "applied": True,
+        "preview_mode": preview,
     }
 
 

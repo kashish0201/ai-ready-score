@@ -37,15 +37,19 @@ async function request(url, options = {}, timeoutMs = 90000) {
 export async function uploadDataset(file) {
   const form = new FormData();
   form.append("file", file);
-  return request("/api/datasets", { method: "POST", body: form });
+  return request("/api/datasets", { method: "POST", body: form }, 180000);
 }
 
 export async function setDatasetTarget(datasetId, targetCol) {
-  return request(`/api/datasets/${datasetId}/target`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target_col: targetCol }),
-  });
+  return request(
+    `/api/datasets/${datasetId}/target`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_col: targetCol }),
+    },
+    180000,
+  );
 }
 
 export async function getDatasetScore(datasetId) {
@@ -56,7 +60,7 @@ export async function getDatasetPreview(datasetId, { targetRatio = 1.5, selected
   const params = new URLSearchParams();
   params.set("target_ratio", String(targetRatio));
   if (selected) params.set("selected", selected);
-  return request(`/api/datasets/${datasetId}/preview?${params}`, {}, 90000);
+  return request(`/api/datasets/${datasetId}/preview?${params}`, {}, 180000);
 }
 
 export async function applyDatasetFix(datasetId, { fix, targetRatio = 1.5 }) {
@@ -64,7 +68,7 @@ export async function applyDatasetFix(datasetId, { fix, targetRatio = 1.5 }) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fix, target_ratio: targetRatio }),
-  }, 90000);
+  }, 300000);
 }
 
 export async function resetDataset(datasetId) {

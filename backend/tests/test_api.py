@@ -45,6 +45,19 @@ def upload(df: pd.DataFrame, name: str = "data.csv") -> str:
     return res.json()["dataset_id"]
 
 
+def test_upload_returns_partial_score():
+    df = pd.DataFrame({"x": [1, 1, 2], "y": [0, 0, 1]})
+    files = {"file": ("data.csv", csv_bytes(df), "text/csv")}
+    res = client.post("/api/datasets", files=files)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["score"] is not None
+    assert body["needs_target"] is True
+    assert body["target_col"] is None
+    assert len(body["issues"]) >= 1
+    assert not any(i["check"] == "class_imbalance" for i in body["issues"])
+
+
 def test_upload_returns_target_candidates():
     df = pd.DataFrame({
         "id": [f"r{i}" for i in range(25)],
@@ -70,6 +83,7 @@ def test_score_and_preview_after_target():
     assert res.status_code == 200
     score = res.json()
     assert "score" in score
+    assert score["needs_target"] is False
     assert score["round_num"] == 1
     assert score["original_score"]["score"] == score["score"]
 

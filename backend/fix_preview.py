@@ -207,6 +207,14 @@ SINGLE_FIXES = {
     ),
 }
 
+# Preview-only: class imbalance uses fast resampling instead of SDV.
+PREVIEW_FIXES = {
+    **SINGLE_FIXES,
+    "class_imbalance": lambda d, t, r, tags=None: fx.fix_class_imbalance(
+        d, t, target_ratio=r, tags=tags, preview=True
+    ),
+}
+
 
 def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
                   selected=None, target_ratio=1.5, tags=None):
@@ -221,7 +229,7 @@ def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
     score_before = compute_ai_ready_score(issues_before)
     checks_present = set(issues_before["check"].unique()) if len(issues_before) else set()
 
-    candidates = checks_present & set(SINGLE_FIXES)
+    candidates = checks_present & set(PREVIEW_FIXES)
     if selected is not None:
         candidates &= set(selected)
 
@@ -231,7 +239,7 @@ def preview_fixes(df, target_col, run_quality_checks, compute_ai_ready_score,
             continue
 
         try:
-            fixed, log = SINGLE_FIXES[name](df, target_col, target_ratio, tags)
+            fixed, log = PREVIEW_FIXES[name](df, target_col, target_ratio, tags)
         except Exception as e:
             previews.append({"fix": name, "error": str(e)})
             continue
