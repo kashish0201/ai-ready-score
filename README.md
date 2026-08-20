@@ -103,12 +103,29 @@ The score measures **absence of detected issues**, not ground truth.
 - Synthetic rows are generated, not observed
 - Always read the fix-card warnings before training on the result
 
-## Tests
+ ## How it Works
 
-```bash
-pytest backend/tests -q
-```
+![Dataset Overview](assets/dataset_tab.png)
 
-## License
+Screenshot 1 — Upload a CSV and instantly see dataset overview: rows, columns, missing data percentage, and column types.
 
-No license file is included yet — all rights reserved by the author unless otherwise stated.
+
+![Semantic Tags](assets/tags_tab.png)
+
+Screenshot 2 — Semantic tags auto-detect column roles (identifier, temporal, geographic) so fixes don't damage meaningful columns.
+
+
+![Issues](assets/issues_tab.png)
+
+Screenshot 3 — 15 quality issues detected, sorted by severity, each with a plain-language explanation.
+
+
+![Fixes](assets/fixes.png)
+
+Screenshot 4 — Fix previews show the cost of each repair before you apply it — score gain, distribution shift, and a safe/review/destructive verdict.
+
+
+![Score](assets/score.png)
+
+Screenshot 5 — Overall readiness score with severity breakdown and a summary recommendation.
+
