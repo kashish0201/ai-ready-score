@@ -120,12 +120,12 @@ Screenshot 2 — Semantic tags auto-detect column roles (identifier, temporal, g
 Screenshot 3 — 15 quality issues detected, sorted by severity, each with a plain-language explanation.
 
 
-![Fixes](assets/fixes.png)
+![Fixes](assets/fixes_tab.png)
 
 Screenshot 4 — Fix previews show the cost of each repair before you apply it — score gain, distribution shift, and a safe/review/destructive verdict.
 
 
-![Score](assets/score.png)
+![Score](assets/score_tab.png)
 
 Screenshot 5 — Overall readiness score with severity breakdown and a summary recommendation.
 
